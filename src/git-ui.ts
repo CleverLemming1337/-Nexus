@@ -4,8 +4,45 @@ import simpleGit from 'simple-git';
 import chalk from 'chalk';
 import gitActions from './git/actionPrompt';
 import stashPrompt from './git/stashPrompt';
+import { getChangedFiles, getStagedFiles, getUnstagedFiles, type ChangedFile } from './git/gitUtils';
 
 const git = simpleGit();
+
+async function selectFile(files: ChangedFile[], message: string): Promise<ChangedFile | null> {
+  if (files.length === 0) {
+    console.log(chalk.yellow('No files available for this action.'));
+    return null;
+  }
+
+  const { selectedFile } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'selectedFile',
+      message,
+      choices: files.map(file => ({ name: `${file.path} [${file.working_dir}${file.index}]`, value: file }))
+    }
+  ])
+
+  return selectedFile;
+}
+
+async function stageFile() {
+  const unstagedFiles = await getUnstagedFiles(git);
+  const file = await selectFile(unstagedFiles, 'Select a file to stage:');
+  if (file) {
+    await git.add(file.path);
+    console.log(chalk.green(`Staged: ${file.path}`));
+  }
+}
+
+async function unstageFile() {
+  const stagedFiles = await getStagedFiles(git);
+  const file = await selectFile(stagedFiles, 'Select a file to unstage:');
+  if (file) {
+    await git.reset(['--', file.path]);
+    console.log(chalk.green(`Unstaged: ${file.path}`));
+  }
+}
 
 async function mainMenu() {
   const status = await git.status();
@@ -35,6 +72,11 @@ async function mainMenu() {
     { name: 'Delete branch', key: 'd', value: 'delete_branch' },
     { name: 'Show graph', key: 'g', value: 'graph' },
     { name: 'Manage stashes', key: 't', value: 'stash' },
+    { name: 'Undo changes', key: 'u', value: 'undo_changes', subActions: [
+      { name: 'Undo all', value: 'undo_changes' },
+      { name: 'Undo file', value: 'undo_file' },
+      { name: 'Undo staged file', value: 'undo_staged_file' }
+    ] },
     { name: 'Exit', key: 'x', value: 'exit' }
   ];
 
@@ -46,6 +88,16 @@ async function mainMenu() {
     case 'stage_all':
       await git.add('.');
       console.log(chalk.green('All changes staged.'));
+      break;
+    case 'unstage_all':
+      await git.reset();
+      console.log(chalk.green('All changes unstaged.'));
+      break;
+    case 'stage_file':
+      await stageFile();
+      break;
+    case 'unstage_file':
+      await unstageFile();
       break;
     case 'commit':
       const commitMsg = await inquirer.prompt([
@@ -135,6 +187,50 @@ async function mainMenu() {
       break;
     case 'stash':
       await stashPrompt(git);
+      break;
+    case 'undo_changes':
+      const { undoAllChanges } = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'undoAllChanges',
+          message: 'Are you sure you want to undo all changes?',
+          default: false
+        }
+      ]);
+      if (undoAllChanges) {
+        await git.reset(['--hard']);
+        console.log(chalk.green('All changes undone.'));
+      }
+      break;
+    case 'undo_file':
+      const file = await selectFile(await getChangedFiles(git), 'Select a file to undo:');
+      const restoreAnswer = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'restore',
+          message: 'Are you sure you want to restore this file?',
+          default: false
+        }
+      ])
+      if (file && restoreAnswer.restore) {
+        await git.raw(['restore', file.path]);
+        console.log(chalk.green(`Undo: ${file.path}`));
+      }
+      break;
+    case 'undo_staged_file':
+      const restoreStagedFile = await selectFile(await getChangedFiles(git), 'Select a file to undo:');
+      const restoreStagedAnswer = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'restore',
+          message: 'Are you sure you want to undo all staged changes made to this file?',
+          default: false
+        }
+      ])
+      if (restoreStagedFile && restoreStagedAnswer.restore) {
+        await git.raw(['restore', '--staged', '--worktree', restoreStagedFile.path]);
+        console.log(chalk.green(`Undo: ${restoreStagedFile.path}`));
+      }
       break;
     case 'exit':
       console.log('Goodbye!');

@@ -141,7 +141,7 @@ const gitActions = createPrompt((config: { actions: GitAction[], keys?: 'number'
         continue
       }
 
-      if (selectSubActionIndex !== -1 && action.subActions && action.subActions.length > 0) {
+      if (position[0] === r && position[1] === c && selectSubActionIndex !== -1 && action.subActions && action.subActions.length > 0) {
         // Render subactions
         const visibleCount = ACTION_HEIGHT - 2
         const start = Math.max(0, selectSubActionIndex - visibleCount + 1)
