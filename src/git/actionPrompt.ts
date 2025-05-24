@@ -1,6 +1,7 @@
 import { createPrompt, useKeypress, useState } from '@inquirer/core'
 import useTerminalSize from './useTerminalSize'
 import inquirer from 'inquirer'
+import { box, line, type Box, type Line } from './boxUtils'
 
 interface GitAction {
   name: string
@@ -125,8 +126,96 @@ const gitActions = createPrompt((config: { actions: GitAction[], keys?: 'number'
     for (let c = 0; c < cols; c++) {
       const action = grid[r][c]
       const isSelected = r === position[0] && c === position[1]
-      boxes.push(renderActionBox(action, isSelected, selectSubActionIndex, ACTION_WIDTH, ACTION_HEIGHT))
+      
+      if (!action) {
+        // Empty box
+        boxes.push(box({
+          style: {
+            border: 'single',
+            width: ACTION_WIDTH,
+            height: ACTION_HEIGHT,
+            innerPadding: 1
+          },
+          lines: []
+        }))
+        continue
+      }
+
+      if (selectSubActionIndex !== -1 && action.subActions && action.subActions.length > 0) {
+        // Render subactions
+        const visibleCount = ACTION_HEIGHT - 2
+        const start = Math.max(0, selectSubActionIndex - visibleCount + 1)
+        const subActionsToShow = action.subActions.slice(start, start + visibleCount)
+        
+        const lines: Line[] = subActionsToShow.map((subAction, idx) => {
+          const isSelected = start + idx === selectSubActionIndex
+          const content = subAction.key 
+            ? `[${subAction.key.toUpperCase()}] ${subAction.name}`
+            : subAction.name
+          
+          return line(' ' + content, 'left', {
+            background: isSelected ? '\x1b[0m' : '\x1b[7m',
+          })
+        })
+
+        boxes.push(box({
+          style: {
+            border: 'single',
+            background: '\x1b[7m',
+            width: ACTION_WIDTH,
+            height: ACTION_HEIGHT,
+            innerPadding: 0 // No inner padding for subaction boxes
+          },
+          lines
+        }))
+      } else {
+        // Regular action box
+        const lines: Line[] = []
+        
+        // Add action name (centered)
+        const words = action.name.split(' ')
+        let currentLine = ''
+        for (const word of words) {
+          if ((currentLine + (currentLine ? ' ' : '') + word).length > ACTION_WIDTH - 4) {
+            lines.push(line(currentLine, 'center'))
+            currentLine = word
+          } else {
+            currentLine += (currentLine ? ' ' : '') + word
+          }
+        }
+        if (currentLine) lines.push(line(currentLine, 'center'))
+        
+        // Add key if present (always on 4th line)
+        if (action.key) {
+          // Pad with empty lines if needed to reach 4th line
+          while (lines.length < 3) {
+            lines.push(line('', 'center'))
+          }
+          lines.push(line(action.key.toUpperCase(), 'center', { bold: true }))
+        }
+        
+        // Add indicator for subactions on the last line
+        if (action.subActions) {
+          // Pad with empty lines if needed to reach last line
+          while (lines.length < ACTION_HEIGHT - 3) {
+            lines.push(line('', 'center'))
+          }
+          lines.push(line('*', 'right'))
+        }
+
+        boxes.push(box({
+          style: {
+            border: 'single',
+            background: isSelected ? '\x1b[7m' : undefined,
+            width: ACTION_WIDTH,
+            height: ACTION_HEIGHT,
+            innerPadding: 1
+          },
+          lines
+        }))
+      }
     }
+
     // Render each line of the boxes in this row
     for (let line = 0; line < ACTION_HEIGHT; line++) {
       let rowLine = ''
@@ -143,117 +232,3 @@ const gitActions = createPrompt((config: { actions: GitAction[], keys?: 'number'
 })
 
 export default gitActions;
-
-function renderActionBox(
-  action: GitAction | undefined,
-  isSelected: boolean,
-  selectSubActionIndex: number = -1,
-  width: number,
-  height: number
-): string[] {
-  const lines = Array(height).fill(' '.repeat(width))
-
-  if (!action) {
-    // Empty box
-    lines[0] = '┌' + '─'.repeat(width - 2) + '┐'
-    lines[height - 1] = '└' + '─'.repeat(width - 2) + '┘'
-    for (let i = 1; i < height - 1; i++) {
-      lines[i] = '│' + ' '.repeat(width - 2) + '│'
-    }
-    return lines
-  }
-
-  // Top and bottom borders
-  lines[0] = '┌' + '─'.repeat(width - 2) + '┐'
-  lines[height - 1] = '└' + '─'.repeat(width - 2) + '┘'
-
-  // If subActions are being selected, render them as a list
-  if (selectSubActionIndex !== -1 && action.subActions && action.subActions.length > 0) {
-    const visibleCount = height - 2
-    const visibleLength = width - 4 // 2 for borders, 2 for padding
-    let start = 0
-    // Scroll if needed
-    if (selectSubActionIndex >= visibleCount) {
-      start = selectSubActionIndex - visibleCount + 1
-    }
-    const subActionsToShow = action.subActions.slice(start, start + visibleCount)
-    // Inverse border
-    lines[0] = '\x1b[7m' + lines[0] + '\x1b[0m'
-    lines[height - 1] = '\x1b[7m' + lines[height - 1] + '\x1b[0m'
-    for (let i = 1; i < height - 1; i++) {
-      const subAction = subActionsToShow[i - 1]
-      let content = ''
-      if (subAction) {
-        content = subAction.name.slice(0, visibleLength)
-        if (subAction.key) {
-          content = `[${subAction.key.toUpperCase()}] ${content.slice(subAction.key.length + 4)}`
-        }
-        // Reverse: highlight all except the selected subAction
-        if (start + i - 1 !== selectSubActionIndex) {
-          content = `\x1b[7m${content.padEnd(width - 4)}\x1b[0m`
-        } else {
-          content = content.padEnd(width - 4)
-        }
-      } else {
-        content = ''.padEnd(width - 4)
-        content = `\x1b[7m${content}\x1b[0m`
-      }
-      if (start + i - 1 === selectSubActionIndex) {
-        lines[i] = '\x1b[7m│\x1b[0m ' + content + ' \x1b[7m│\x1b[0m'
-      }
-      else {
-        lines[i] = '\x1b[7m│ \x1b[0m' + content + '\x1b[7m │\x1b[0m'
-      }
-    }
-    return lines
-  }
-
-  // Word wrapping with ' ' as separator and 1 space padding on both sides
-  const wrapWidth = width - 4 // 2 for borders, 2 for padding
-  const words = action.name.split(' ')
-  let wrapped: string[] = []
-  let currentLine = ''
-
-  for (const word of words) {
-    if ((currentLine + (currentLine ? ' ' : '') + word).length > wrapWidth) {
-      wrapped.push(currentLine)
-      currentLine = word
-    } else {
-      currentLine += (currentLine ? ' ' : '') + word
-    }
-  }
-  if (currentLine) wrapped.push(currentLine)
-  wrapped = wrapped.slice(0, height - 2) // fit in box
-
-  // Fill lines 1..height-2 with wrapped content, centered, padded
-  for (let i = 1; i < height - 1; i++) {
-    let content = wrapped[i - 1] || ''
-    // On the 5th line (i == 4), if action.key, show key centered
-    if (i === 4 && action.key) {
-      const keyLabel = action.key.toUpperCase()
-      const pad = wrapWidth - keyLabel.length
-      const padLeft = Math.floor(pad / 2)
-      const padRight = pad - padLeft
-      content = ' '.repeat(padLeft) + keyLabel + ' '.repeat(padRight)
-    } else {
-      const pad = wrapWidth - content.length
-      const padLeft = Math.floor(pad / 2)
-      const padRight = pad - padLeft
-      content = ' '.repeat(padLeft) + content + ' '.repeat(padRight)
-    }
-    lines[i] = '│ ' + content + ' │'
-  }
-
-  if (action.subActions) {
-    lines[height - 2] = lines[height - 2].slice(0, width - 2) + '*│'
-  }
-
-  // Highlight if selected
-  if (isSelected) {
-    for (let i = 0; i < height; i++) {
-      lines[i] = lines[i].replace(/./g, (ch: string) => `\x1b[7m${ch}\x1b[0m`)
-    }
-  }
-
-  return lines
-}
